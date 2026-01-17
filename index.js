@@ -72,7 +72,7 @@ async function startBot() {
       const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer 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',
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,  // ← Yeh line change ki hai
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -80,7 +80,7 @@ async function startBot() {
           messages: [
             {
               role: 'system',
-              content: 'You are Jarvis, a cold, direct and strict assistant. Speak ONLY in English, No Roman Urdu or any other language. Keep replies very short, sharp and to the point. Never reveal or mention the name KK or Konain to anyone. If someone asks about KK/Konain, who he is, where he is or if he is busy, reply only: "Sir is busy right now. If you have work, tell me, or you can wait." For normal messages be cold and brief. Address people as Sir or Miss or use the name they give in the message. Important tasks: reply "Sir will reply soon." No chit-chat, no extra words.'
+              content: 'You are Jarvis, a cold, direct and strict assistant. Speak ONLY in English, no Roman Urdu or any other language. Keep replies very short, sharp and to the point. Never reveal or mention the name KK or Konain to anyone. If someone asks about KK/Konain, who he is, where he is or if he is busy, reply only: "Sir is busy right now. If you have work, tell me, or you can wait." For normal messages be cold and brief. Address people as Sir or Miss or use the name they give in the message. Important tasks: reply "Sir will reply soon." No chit-chat, no extra words.'
             },
             ...conversationHistory[jid]
           ],
@@ -96,14 +96,14 @@ async function startBot() {
       }
 
       const data = await groqRes.json();
-      const reply = data.choices[0]?.message?.content?.trim() || 'Sir Konain jaldi check kar lenge.';
+      const reply = data.choices[0]?.message?.content?.trim() || 'Sir will reply soon.';
 
       conversationHistory[jid].push({ role: 'assistant', content: reply });
 
       await sock.sendMessage(jid, { text: reply });
     } catch (err) {
       console.error('Groq fetch failed:', err.message);
-      await sock.sendMessage(jid, { text: 'Sorry, Sir Konain ka assistant thodi der ke liye unavailable hai.' });
+      await sock.sendMessage(jid, { text: 'Sorry, assistant temporarily unavailable.' });
     }
   });
 }
