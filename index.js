@@ -4,8 +4,8 @@ const qrcode = require('qrcode-terminal');
 let conversationHistory = {};
 let replyMode = false;
 let lastOwnerMessageTime = Date.now();
-const OWNER_JID = '923123583827@s.whatsapp.net';
-const SILENT_DURATION = 5 * 60 * 1000; // 5 min
+const OWNER_JID = process.env.OWNER_JID || '923123583827@s.whatsapp.net';
+const SILENT_DURATION = 5 * 60 * 1000; // 5 minutes
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info');
@@ -52,6 +52,7 @@ async function startBot() {
 
     if (text.trim() === '') return;
 
+    // Owner message → silent mode
     if (jid === OWNER_JID) {
       lastOwnerMessageTime = Date.now();
       replyMode = false;
@@ -59,11 +60,28 @@ async function startBot() {
       return;
     }
 
+    // Non-owner, but Sir Konain active → silent
     if (!replyMode) {
       console.log('Sir Konain active hain — bot silent mode mein');
       return;
     }
 
+    // Menu trigger (English + Urdu)
+    if (text.toLowerCase().includes('menu') || text.toLowerCase().includes('منو') || text.toLowerCase().includes('مینو')) {
+      await sock.sendMessage(jid, { 
+        image: { url: 'https://s3-alpha.figma.com/hub/file/3816377659/78217caf-c0ef-4862-987c-7b82aeea98fe-cover.png' },  // ← Yahan apna real menu image link paste kar
+        caption: 'Here is the menu, Sir.'
+      });
+      return;
+    }
+
+    // Order confirmation
+    if (text.toLowerCase().includes('order')) {
+      await sock.sendMessage(jid, { text: 'Order confirmed. Delivery in 30 minutes. Thank you, Sir.' });
+      return;
+    }
+
+    // Conversation history for Groq
     if (!conversationHistory[jid]) conversationHistory[jid] = [];
     conversationHistory[jid].push({ role: 'user', content: text });
     if (conversationHistory[jid].length > 10) conversationHistory[jid] = conversationHistory[jid].slice(-10);
@@ -72,7 +90,7 @@ async function startBot() {
       const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,  // ← Yeh line change ki hai
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
