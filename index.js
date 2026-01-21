@@ -69,7 +69,7 @@ async function startBot() {
     // Menu trigger (English + Urdu)
     if (text.toLowerCase().includes('menu') || text.toLowerCase().includes('منو') || text.toLowerCase().includes('مینو')) {
       await sock.sendMessage(jid, { 
-        image: { url: 'https://s3-alpha.figma.com/hub/file/3816377659/78217caf-c0ef-4862-987c-7b82aeea98fe-cover.png' },  // ← Yahan apna real menu image link paste kar
+        image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },  // ← Yeh naya link daal diya
         caption: 'Here is the menu, Sir.'
       });
       return;
