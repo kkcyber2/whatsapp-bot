@@ -4,17 +4,17 @@ const qrcode = require('qrcode-terminal');
 let conversationHistory = {};
 const OWNER_JID = '923243249669@s.whatsapp.net'; // Owner number
 
-// Menu Items (for recognition & pricing)
+// Menu Items with variations for fuzzy match
 const menuItems = {
-  'beef steak': { price: 'Rs 1200', description: 'Grilled beef steak with sides' },
-  'beef burger': { price: 'Rs 800', description: 'Juicy beef burger' },
-  'beef karahi': { price: 'Rs 1500', description: 'Traditional beef karahi' },
-  'beef handi': { price: 'Rs 1400', description: 'Creamy beef handi' },
-  'beef nihari': { price: 'Rs 1300', description: 'Special beef nihari' },
-  'fries': { price: 'Rs 250', description: 'Golden fries' },
-  'salad': { price: 'Rs 200', description: 'Fresh salad' },
-  'soft drinks': { price: 'Rs 100', description: 'Coke/Pepsi' },
-  'lassi': { price: 'Rs 150', description: 'Sweet lassi' }
+  'beef steak': { price: 'Rs 1200', variations: ['beef steak', 'steak', 'beefsteak'] },
+  'beef burger': { price: 'Rs 800', variations: ['beef burger', 'burger', 'beefburger'] },
+  'beef karahi': { price: 'Rs 1500', variations: ['beef karahi', 'karahi', 'beef karhai'] },
+  'beef handi': { price: 'Rs 1400', variations: ['beef handi', 'handi', 'beef handi'] },
+  'beef nihari': { price: 'Rs 1300', variations: ['beef nihari', 'nihari', 'beef nihari'] },
+  'fries': { price: 'Rs 250', variations: ['fries', 'french fries', 'chips'] },
+  'salad': { price: 'Rs 200', variations: ['salad', 'fresh salad'] },
+  'soft drinks': { price: 'Rs 100', variations: ['soft drink', 'coke', 'pepsi', 'sprite'] },
+  'lassi': { price: 'Rs 150', variations: ['lassi', 'sweet lassi'] },
   // Add more if needed
 };
 
@@ -48,7 +48,7 @@ async function startBot() {
     const msg = messages[0];
     if (!msg.message || msg.key.fromMe) return;
 
-    // Handle voice messages / calls / non-text
+    // Handle voice / call / non-text
     if (msg.message.audioMessage || msg.message.videoMessage || msg.message.call || msg.message.stickerMessage) {
       await sock.sendMessage(msg.key.remoteJid, { text: 'Sorry Sir, I can only process text messages right now. Please type your order or say "menu". 😊' });
       return;
@@ -81,17 +81,21 @@ async function startBot() {
       return;
     }
 
-    // Order handling
-    if (text.toLowerCase().includes('order') || text.toLowerCase().includes('want') || text.toLowerCase().includes('need')) {
+    // Order handling with better fuzzy match
+    if (text.toLowerCase().includes('order') || text.toLowerCase().includes('want') || text.toLowerCase().includes('need') || text.toLowerCase().includes('give me') || text.toLowerCase().includes('i want')) {
       const lowerText = text.toLowerCase();
       let orderedItem = null;
       let price = '';
       for (const item in menuItems) {
-        if (lowerText.includes(item)) {
-          orderedItem = item;
-          price = menuItems[item].price;
-          break;
+        const variations = menuItems[item].variations;
+        for (const varItem of variations) {
+          if (lowerText.includes(varItem)) {
+            orderedItem = item;
+            price = menuItems[item].price;
+            break;
+          }
         }
+        if (orderedItem) break;
       }
 
       if (orderedItem) {
@@ -114,7 +118,7 @@ async function startBot() {
       return;
     }
 
-    // Normal friendly sales conversation
+    // Normal friendly sales conversation (no Urdu replies)
     if (!conversationHistory[jid]) conversationHistory[jid] = [];
     conversationHistory[jid].push({ role: 'user', content: text });
     if (conversationHistory[jid].length > 10) conversationHistory[jid] = conversationHistory[jid].slice(-10);
