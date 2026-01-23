@@ -4,6 +4,22 @@ const qrcode = require('qrcode-terminal');
 let conversationHistory = {};
 const OWNER_JID = '923243249669@s.whatsapp.net'; // Owner number
 
+// Menu Items Array (image ke hisaab se - names lowercase mein for easy check, prices add kiye)
+const menuItems = {
+  'beef steak': { price: 'Rs 1200', description: 'Grilled beef steak with sides' },
+  'beef burger': { price: 'Rs 800', description: 'Juicy beef burger' },
+  'beef karahi': { price: 'Rs 1500', description: 'Traditional beef karahi' },
+  'beef handi': { price: 'Rs 1400', description: 'Creamy beef handi' },
+  'beef nihari': { price: 'Rs 1300', description: 'Special beef nihari' },
+  'onion rings': { price: 'Rs 300', description: 'Crispy onion rings' },
+  'garlic bread': { price: 'Rs 350', description: 'Fresh garlic bread' },
+  'fries': { price: 'Rs 250', description: 'Golden fries' },
+  'salad': { price: 'Rs 200', description: 'Fresh salad' },
+  'soft drinks': { price: 'Rs 100', description: 'Coke/Pepsi' },
+  'lassi': { price: 'Rs 150', description: 'Sweet lassi' }
+  // Add more items from menu if needed
+};
+
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info');
   const sock = makeWASocket({
@@ -61,27 +77,35 @@ async function startBot() {
       return;
     }
 
-    // Order handling
-    if (text.toLowerCase().includes('order') || text.toLowerCase().includes('آرڈر') || text.toLowerCase().includes('want') || text.toLowerCase().includes('need') || text.toLowerCase().includes('burger') || text.toLowerCase().includes('beef') || text.toLowerCase().includes('steak')) {
-      const customerNumber = jid.split('@')[0];
-      const orderMessage = `New Order Received!\nFrom: ${customerNumber}\nOrder Details: ${text}\nTime: ${new Date().toLocaleString('en-PK')}\nPlease process immediately.`;
+    // Order handling (check if item in menu)
+    if (text.toLowerCase().includes('order') || text.toLowerCase().includes('آرڈر') || text.toLowerCase().includes('want') || text.toLowerCase().includes('need')) {
+      const lowerText = text.toLowerCase();
+      let orderedItem = null;
+      for (const item in menuItems) {
+        if (lowerText.includes(item)) {
+          orderedItem = item;
+          break;
+        }
+      }
 
-      // Customer ko confirm
-      await sock.sendMessage(jid, { text: 'Order confirmed! 🎉 Delivery in 30 minutes. Thank you for choosing us!' });
+      if (orderedItem) {
+        const itemInfo = menuItems[orderedItem];
+        const customerNumber = jid.split('@')[0];
+        const orderMessage = `New Order Received!\nFrom: ${customerNumber}\nItem: ${orderedItem.charAt(0).toUpperCase() + orderedItem.slice(1)}\nPrice: ${itemInfo.price}\nDetails: ${text}\nTime: ${new Date().toLocaleString('en-PK')}\nPlease process immediately.`;
 
-      // Owner ko notify
-      await sock.sendMessage(OWNER_JID, { text: orderMessage });
+        // Customer ko confirm
+        await sock.sendMessage(jid, { text: `Order confirmed for ${orderedItem.charAt(0).toUpperCase() + orderedItem.slice(1)} (${itemInfo.price}). Delivery in 30 minutes. Thank you! 😊 / ${itemInfo.price} میں آرڈر کنفرم ہو گیا۔ 30 منٹ میں ڈلیوری۔ شکریہ!` });
 
-      return;
-    }
-
-    // If order item not in menu (simple check – expand kar sakte hain)
-    if (text.toLowerCase().includes('browne') || text.toLowerCase().includes('brownie') || text.toLowerCase().includes('pizza') || text.toLowerCase().includes('pasta')) {  // Add more non-menu items
-      await sock.sendMessage(jid, { text: 'Sorry Sir, we don\'t have that item right now. Please check the menu again and order something from it. 😊 / افسوس، یہ آئٹم ابھی دستیاب نہیں۔ مینو دیکھیں اور اس میں سے آرڈر کریں۔' });
-      await sock.sendMessage(jid, { 
-        image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
-        caption: 'Here is our menu again. What would you like? / مینو دوبارہ یہ رہا۔ کیا پسند کریں گے؟'
-      });
+        // Owner ko notify
+        await sock.sendMessage(OWNER_JID, { text: orderMessage });
+      } else {
+        // Not in menu
+        await sock.sendMessage(jid, { text: 'Sorry Sir, we don\'t have that item right now. Please check the menu and order something from it. 😊 / افسوس، یہ آئٹم دستیاب نہیں۔ مینو دیکھیں اور اس میں سے آرڈر کریں۔' });
+        await sock.sendMessage(jid, { 
+          image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
+          caption: 'Here is our menu again. What would you like? / مینو دوبارہ یہ رہا۔ کیا پسند کریں گے؟'
+        });
+      }
       return;
     }
 
