@@ -2,9 +2,10 @@ const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = requi
 const qrcode = require('qrcode-terminal');
 
 let conversationHistory = {};
+let pendingOrders = {}; // To store pending order before location
 const OWNER_JID = '923243249669@s.whatsapp.net'; // Owner number
 
-// Menu Items with variations for fuzzy match
+// Menu Items with variations
 const menuItems = {
   'beef steak': { price: 'Rs 1200', variations: ['beef steak', 'steak', 'beefsteak'] },
   'beef burger': { price: 'Rs 800', variations: ['beef burger', 'burger', 'beefburger'] },
@@ -13,9 +14,8 @@ const menuItems = {
   'beef nihari': { price: 'Rs 1300', variations: ['beef nihari', 'nihari', 'beef nihari'] },
   'fries': { price: 'Rs 250', variations: ['fries', 'french fries', 'chips'] },
   'salad': { price: 'Rs 200', variations: ['salad', 'fresh salad'] },
-  'soft drinks': { price: 'Rs 100', variations: ['soft drink', 'coke', 'pepsi', 'sprite'] },
-  'lassi': { price: 'Rs 150', variations: ['lassi', 'sweet lassi'] },
-  // Add more if needed
+  'soft drinks': { price: 'Rs 100', variations: ['soft drink', 'coke', 'pepsi', 'sprite', 'drink'] },
+  'lassi': { price: 'Rs 150', variations: ['lassi', 'sweet lassi'] }
 };
 
 async function startBot() {
@@ -48,7 +48,7 @@ async function startBot() {
     const msg = messages[0];
     if (!msg.message || msg.key.fromMe) return;
 
-    // Handle voice / call / non-text
+    // Handle voice, call, sticker, etc.
     if (msg.message.audioMessage || msg.message.videoMessage || msg.message.call || msg.message.stickerMessage) {
       await sock.sendMessage(msg.key.remoteJid, { text: 'Sorry Sir, I can only process text messages right now. Please type your order or say "menu". 😊' });
       return;
@@ -81,35 +81,42 @@ async function startBot() {
       return;
     }
 
-    // Order handling with better fuzzy match
+    // Order handling with multiple items support
     if (text.toLowerCase().includes('order') || text.toLowerCase().includes('want') || text.toLowerCase().includes('need') || text.toLowerCase().includes('give me') || text.toLowerCase().includes('i want')) {
       const lowerText = text.toLowerCase();
-      let orderedItem = null;
-      let price = '';
-      for (const item in menuItems) {
-        const variations = menuItems[item].variations;
-        for (const varItem of variations) {
-          if (lowerText.includes(varItem)) {
-            orderedItem = item;
-            price = menuItems[item].price;
-            break;
+      const orderedItems = [];
+      let totalPrice = 0;
+
+      // Split text into possible items (simple split by 'and', ',', 'with')
+      const possibleItems = lowerText.split(/\s+(?:and|with|or|,)\s+|\s+/).filter(word => word.trim());
+
+      for (const word of possibleItems) {
+        for (const item in menuItems) {
+          const variations = menuItems[item].variations;
+          for (const varItem of variations) {
+            if (word.includes(varItem)) {
+              orderedItems.push(item);
+              totalPrice += parseInt(menuItems[item].price.replace('Rs ', ''));
+              break;
+            }
           }
         }
-        if (orderedItem) break;
       }
 
-      if (orderedItem) {
+      if (orderedItems.length > 0) {
+        pendingOrders[jid] = { items: orderedItems, total: totalPrice, details: text }; // Store pending
+
         const customerNumber = jid.split('@')[0];
-        const orderMessage = `New Order Received!\nFrom: ${customerNumber}\nItem: ${orderedItem.charAt(0).toUpperCase() + orderedItem.slice(1)}\nPrice: ${price}\nFull Message: ${text}\nTime: ${new Date().toLocaleString('en-PK')}\nPlease process immediately.`;
+        const itemList = orderedItems.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
+        const orderMessage = `New Order Received!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${totalPrice}\nFull Message: ${text}\nTime: ${new Date().toLocaleString('en-PK')}\nPlease process immediately.`;
 
         // Customer ko confirm + ask location
-        await sock.sendMessage(jid, { text: `Order confirmed for ${orderedItem.charAt(0).toUpperCase() + orderedItem.slice(1)} (${price})! Delivery in 30 minutes. Where should we deliver, Sir? (full address)` });
+        await sock.sendMessage(jid, { text: `Order confirmed for: ${itemList} (Total: Rs ${totalPrice})! Delivery in 30 minutes. Where should we deliver, Sir? (full address)` });
 
         // Owner ko notify
         await sock.sendMessage(OWNER_JID, { text: orderMessage });
       } else {
-        // Not in menu
-        await sock.sendMessage(jid, { text: 'Sorry Sir, we don\'t have that item. Please check the menu and order something from it. 😊' });
+        await sock.sendMessage(jid, { text: 'Sorry Sir, we don\'t have those items. Please check the menu and order something from it. 😊' });
         await sock.sendMessage(jid, { 
           image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
           caption: 'Here is our menu again. What would you like to order?'
@@ -118,7 +125,26 @@ async function startBot() {
       return;
     }
 
-    // Normal friendly sales conversation (no Urdu replies)
+    // Handle location reply (after pending order)
+    if (pendingOrders[jid]) {
+      const order = pendingOrders[jid];
+      const customerNumber = jid.split('@')[0];
+      const location = text;
+
+      const itemList = order.items.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
+      const finalOrderMessage = `Order Finalized!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${order.total}\nDetails: ${order.details}\nDelivery Address: ${location}\nTime: ${new Date().toLocaleString('en-PK')}\nPlease process immediately.`;
+
+      // Customer ko final confirm
+      await sock.sendMessage(jid, { text: `Thank you Sir! Your order (${itemList} - Rs ${order.total}) is confirmed for delivery to: ${location}. Expected in 30 minutes. 😊 Anything else you'd like?` });
+
+      // Owner ko full details with location
+      await sock.sendMessage(OWNER_JID, { text: finalOrderMessage });
+
+      delete pendingOrders[jid]; // Clear pending
+      return;
+    }
+
+    // Normal conversation (friendly sales tone)
     if (!conversationHistory[jid]) conversationHistory[jid] = [];
     conversationHistory[jid].push({ role: 'user', content: text });
     if (conversationHistory[jid].length > 10) conversationHistory[jid] = conversationHistory[jid].slice(-10);
