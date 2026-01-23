@@ -4,7 +4,7 @@ const qrcode = require('qrcode-terminal');
 let conversationHistory = {};
 let replyMode = false;
 let lastOwnerMessageTime = Date.now();
-const OWNER_JID = process.env.OWNER_JID || '923123583827@s.whatsapp.net';
+const OWNER_JID = '923243249669@s.whatsapp.net'; // Owner number (03243249669)
 const SILENT_DURATION = 5 * 60 * 1000; // 5 minutes
 
 async function startBot() {
@@ -69,19 +69,27 @@ async function startBot() {
     // Menu trigger (English + Urdu)
     if (text.toLowerCase().includes('menu') || text.toLowerCase().includes('منو') || text.toLowerCase().includes('مینو')) {
       await sock.sendMessage(jid, { 
-        image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },  // ← Yeh naya link daal diya
-        caption: 'Here is the menu, Sir.'
+        image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
+        caption: 'Here is the menu, Sir. Order now.'
       });
       return;
     }
 
-    // Order confirmation
+    // Order confirmation + notify owner
     if (text.toLowerCase().includes('order')) {
+      const customerNumber = jid.split('@')[0];
+      const orderMessage = `New Order Received!\nFrom: ${customerNumber}\nOrder Details: ${text}\nTime: ${new Date().toLocaleString('en-PK')}\nPlease process immediately.`;
+
+      // Customer ko confirm
       await sock.sendMessage(jid, { text: 'Order confirmed. Delivery in 30 minutes. Thank you, Sir.' });
+
+      // Owner ko notify
+      await sock.sendMessage(OWNER_JID, { text: orderMessage });
+
       return;
     }
 
-    // Conversation history for Groq
+    // Normal conversation with Groq (cold & strict personality)
     if (!conversationHistory[jid]) conversationHistory[jid] = [];
     conversationHistory[jid].push({ role: 'user', content: text });
     if (conversationHistory[jid].length > 10) conversationHistory[jid] = conversationHistory[jid].slice(-10);
@@ -98,12 +106,12 @@ async function startBot() {
           messages: [
             {
               role: 'system',
-              content: 'You are Jarvis, a cold, direct and strict assistant. Speak ONLY in English, no Roman Urdu or any other language. Keep replies very short, sharp and to the point. Never reveal or mention the name KK or Konain to anyone. If someone asks about KK/Konain, who he is, where he is or if he is busy, reply only: "Sir is busy right now. If you have work, tell me, or you can wait." For normal messages be cold and brief. Address people as Sir or Miss or use the name they give in the message. Important tasks: reply "Sir will reply soon." No chit-chat, no extra words.'
+              content: 'You are Jarvis, a cold, direct, strict, and highly professional assistant. Speak ONLY in English. Keep replies very short, sharp, and to the point — no chit-chat, no extra words, no emojis unless necessary. Address the user as Sir or Miss. If the user asks about Konain/KK or his status, reply only: "Sir is busy right now. If you have work, tell me, or you can wait." For all other messages, be brief and cold. Important tasks: reply "Sir will reply soon." Never be friendly or talkative.'
             },
             ...conversationHistory[jid]
           ],
-          temperature: 0.7,
-          max_tokens: 150
+          temperature: 0.6,
+          max_tokens: 100
         })
       });
 
