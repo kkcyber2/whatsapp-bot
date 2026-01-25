@@ -1,21 +1,36 @@
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 
-let conversationHistory = {}; // General chat history
-let orderHistory = {}; // Per user order memory
+let conversationHistory = {}; // Chat history (20 messages)
+let orderHistory = {}; // Per user order memory (last 5 orders)
 const OWNER_JID = '923243249669@s.whatsapp.net'; // Owner number
 
-// Menu Items with variations for better match
+// Full Menu Items from your image (more complete list)
 const menuItems = {
+  // Beef Specials
   'beef steak': { price: 'Rs 1200', variations: ['beef steak', 'steak', 'beefsteak', 'stak', 'beaf steak'] },
   'beef burger': { price: 'Rs 800', variations: ['beef burger', 'burger', 'beefburger', 'burgr', 'beaf burger'] },
   'beef karahi': { price: 'Rs 1500', variations: ['beef karahi', 'karahi', 'beef karhai', 'karhi', 'beaf karahi'] },
   'beef handi': { price: 'Rs 1400', variations: ['beef handi', 'handi', 'beef handi', 'hndi', 'beaf handi'] },
   'beef nihari': { price: 'Rs 1300', variations: ['beef nihari', 'nihari', 'beef nihari', 'nehari', 'beaf nihari'] },
+  'delicious meat': { price: 'Rs 1100', variations: ['delicious meat', 'meat', 'special meat'] },
+  'authentic grill': { price: 'Rs 1300', variations: ['authentic grill', 'grill', 'authentic grilled'] },
+  'tender beef': { price: 'Rs 1400', variations: ['tender beef', 'tender', 'beef tender'] },
+
+  // Sides & Extras
   'fries': { price: 'Rs 250', variations: ['fries', 'french fries', 'chips', 'fry', 'fris'] },
   'salad': { price: 'Rs 200', variations: ['salad', 'fresh salad', 'salat', 'saled'] },
+  'roasted vegetables': { price: 'Rs 300', variations: ['roasted vegetables', 'vegetables', 'roasted veg'] },
+  'garlic mashed potatoes': { price: 'Rs 350', variations: ['garlic mashed potatoes', 'mashed potatoes', 'garlic potatoes'] },
+
+  // Drinks
   'soft drinks': { price: 'Rs 100', variations: ['soft drink', 'coke', 'pepsi', 'sprite', 'drink', 'sft drink'] },
-  'lassi': { price: 'Rs 150', variations: ['lassi', 'sweet lassi', 'lasy', 'lasee'] }
+  'iced tea': { price: 'Rs 150', variations: ['iced tea', 'ice tea'] },
+  'fresh lemonade': { price: 'Rs 180', variations: ['fresh lemonade', 'lemonade'] },
+
+  // Desserts
+  'chocolate brownie': { price: 'Rs 400', variations: ['chocolate brownie', 'brownie', 'chocolate browni', 'brownie', 'brownies'] },
+  'dessert of the day': { price: 'Rs 350', variations: ['dessert', 'dessert of the day'] }
 };
 
 async function startBot() {
@@ -48,7 +63,7 @@ async function startBot() {
     const msg = messages[0];
     if (!msg.message || msg.key.fromMe) return;
 
-    // Handle non-text (voice, call, etc.)
+    // Handle non-text (voice, call, sticker)
     if (msg.message.audioMessage || msg.message.videoMessage || msg.message.call || msg.message.stickerMessage) {
       await sock.sendMessage(msg.key.remoteJid, { text: 'Sorry Sir, I can only process text messages right now. Please type your order or say "menu". 😊' });
       return;
@@ -64,7 +79,7 @@ async function startBot() {
     // First message → welcome + auto menu
     if (!conversationHistory[jid]) {
       conversationHistory[jid] = [];
-      orderHistory[jid] = []; // Initialize order memory
+      orderHistory[jid] = []; // Order memory
       await sock.sendMessage(jid, { 
         image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
         caption: 'Welcome to our restaurant! 😊 Here is our menu. What would you like to order today?'
@@ -82,13 +97,13 @@ async function startBot() {
       return;
     }
 
-    // Order handling (multiple items + memory)
+    // Order handling (multiple items support)
     if (text.toLowerCase().includes('order') || text.toLowerCase().includes('want') || text.toLowerCase().includes('need') || text.toLowerCase().includes('give me') || text.toLowerCase().includes('i want')) {
       const lowerText = text.toLowerCase();
       const orderedItems = [];
       let totalPrice = 0;
 
-      // Split text into possible items
+      // Split by 'and', ',', 'with', 'or'
       const possibleItems = lowerText.split(/\s+(?:and|with|or|,)\s+|\s+/).filter(word => word.trim());
 
       for (const word of possibleItems) {
@@ -105,16 +120,14 @@ async function startBot() {
       }
 
       if (orderedItems.length > 0) {
-        orderHistory[jid].push({ items: orderedItems, total: totalPrice, details: text, status: 'confirmed', time: new Date().toLocaleString('en-PK') }); // Save to memory
+        orderHistory[jid].push({ items: orderedItems, total: totalPrice, details: text, status: 'confirmed', time: new Date().toLocaleString('en-PK') });
 
         const customerNumber = jid.split('@')[0];
         const itemList = orderedItems.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
         const orderMessage = `New Order Received!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${totalPrice}\nFull Message: ${text}\nTime: ${new Date().toLocaleString('en-PK')}\nPlease process immediately.`;
 
-        // Customer ko confirm + ask location
         await sock.sendMessage(jid, { text: `Order confirmed for: ${itemList} (Total: Rs ${totalPrice})! Delivery in 30 minutes. Where should we deliver, Sir? (full address)` });
 
-        // Owner ko notify
         await sock.sendMessage(OWNER_JID, { text: orderMessage });
       } else {
         await sock.sendMessage(jid, { text: 'Sorry Sir, we don\'t have those items. Please check the menu and order something from it. 😊' });
@@ -132,9 +145,8 @@ async function startBot() {
         const lastOrder = orderHistory[jid][orderHistory[jid].length - 1];
         lastOrder.status = 'cancelled';
 
-        await sock.sendMessage(jid, { text: 'Your order has been cancelled. Sorry for any inconvenience. What else can I help with? 😊' });
+        await sock.sendMessage(jid, { text: 'Your last order has been cancelled. Sorry for any inconvenience. What else can I help with? 😊' });
 
-        // Owner ko notify
         await sock.sendMessage(OWNER_JID, { text: 'Order Cancelled!\nFrom: ' + jid.split('@')[0] + '\nDetails: ' + lastOrder.details });
       } else {
         await sock.sendMessage(jid, { text: 'No recent order to cancel, Sir. Would you like to place one? 😊' });
@@ -172,10 +184,10 @@ async function startBot() {
       return;
     }
 
-    // Normal conversation (friendly sales tone)
+    // Normal conversation
     if (!conversationHistory[jid]) conversationHistory[jid] = [];
     conversationHistory[jid].push({ role: 'user', content: text });
-    if (conversationHistory[jid].length > 20) conversationHistory[jid] = conversationHistory[jid].slice(-20); // Memory for 20 messages
+    if (conversationHistory[jid].length > 20) conversationHistory[jid] = conversationHistory[jid].slice(-20);
 
     try {
       const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
