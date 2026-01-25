@@ -1,36 +1,22 @@
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 
-let conversationHistory = {}; // Chat history (20 messages)
-let orderHistory = {}; // Per user order memory (last 5 orders)
+let conversationHistory = {};
+let orderHistory = {}; // Per user order memory
 const OWNER_JID = '923243249669@s.whatsapp.net'; // Owner number
 
-// Full Menu Items from your image (more complete list)
+// Full Menu Items
 const menuItems = {
-  // Beef Specials
-  'beef steak': { price: 'Rs 1200', variations: ['beef steak', 'steak', 'beefsteak', 'stak', 'beaf steak'] },
-  'beef burger': { price: 'Rs 800', variations: ['beef burger', 'burger', 'beefburger', 'burgr', 'beaf burger'] },
-  'beef karahi': { price: 'Rs 1500', variations: ['beef karahi', 'karahi', 'beef karhai', 'karhi', 'beaf karahi'] },
-  'beef handi': { price: 'Rs 1400', variations: ['beef handi', 'handi', 'beef handi', 'hndi', 'beaf handi'] },
-  'beef nihari': { price: 'Rs 1300', variations: ['beef nihari', 'nihari', 'beef nihari', 'nehari', 'beaf nihari'] },
-  'delicious meat': { price: 'Rs 1100', variations: ['delicious meat', 'meat', 'special meat'] },
-  'authentic grill': { price: 'Rs 1300', variations: ['authentic grill', 'grill', 'authentic grilled'] },
-  'tender beef': { price: 'Rs 1400', variations: ['tender beef', 'tender', 'beef tender'] },
-
-  // Sides & Extras
-  'fries': { price: 'Rs 250', variations: ['fries', 'french fries', 'chips', 'fry', 'fris'] },
-  'salad': { price: 'Rs 200', variations: ['salad', 'fresh salad', 'salat', 'saled'] },
-  'roasted vegetables': { price: 'Rs 300', variations: ['roasted vegetables', 'vegetables', 'roasted veg'] },
-  'garlic mashed potatoes': { price: 'Rs 350', variations: ['garlic mashed potatoes', 'mashed potatoes', 'garlic potatoes'] },
-
-  // Drinks
-  'soft drinks': { price: 'Rs 100', variations: ['soft drink', 'coke', 'pepsi', 'sprite', 'drink', 'sft drink'] },
-  'iced tea': { price: 'Rs 150', variations: ['iced tea', 'ice tea'] },
-  'fresh lemonade': { price: 'Rs 180', variations: ['fresh lemonade', 'lemonade'] },
-
-  // Desserts
-  'chocolate brownie': { price: 'Rs 400', variations: ['chocolate brownie', 'brownie', 'chocolate browni', 'brownie', 'brownies'] },
-  'dessert of the day': { price: 'Rs 350', variations: ['dessert', 'dessert of the day'] }
+  'beef steak': { price: 'Rs 1200', variations: ['beef steak', 'steak', 'beefsteak'] },
+  'beef burger': { price: 'Rs 800', variations: ['beef burger', 'burger', 'beefburger'] },
+  'beef karahi': { price: 'Rs 1500', variations: ['beef karahi', 'karahi', 'beef karhai'] },
+  'beef handi': { price: 'Rs 1400', variations: ['beef handi', 'handi', 'beef handi'] },
+  'beef nihari': { price: 'Rs 1300', variations: ['beef nihari', 'nihari', 'beef nihari'] },
+  'fries': { price: 'Rs 250', variations: ['fries', 'french fries', 'chips'] },
+  'salad': { price: 'Rs 200', variations: ['salad', 'fresh salad'] },
+  'soft drinks': { price: 'Rs 100', variations: ['soft drink', 'coke', 'pepsi', 'sprite', 'drink'] },
+  'lassi': { price: 'Rs 150', variations: ['lassi', 'sweet lassi'] },
+  'chocolate brownie': { price: 'Rs 400', variations: ['chocolate brownie', 'brownie', 'browni'] }
 };
 
 async function startBot() {
@@ -63,7 +49,7 @@ async function startBot() {
     const msg = messages[0];
     if (!msg.message || msg.key.fromMe) return;
 
-    // Handle non-text (voice, call, sticker)
+    // Handle non-text
     if (msg.message.audioMessage || msg.message.videoMessage || msg.message.call || msg.message.stickerMessage) {
       await sock.sendMessage(msg.key.remoteJid, { text: 'Sorry Sir, I can only process text messages right now. Please type your order or say "menu". 😊' });
       return;
@@ -76,10 +62,10 @@ async function startBot() {
 
     if (text.trim() === '') return;
 
-    // First message → welcome + auto menu
+    // Welcome + menu
     if (!conversationHistory[jid]) {
       conversationHistory[jid] = [];
-      orderHistory[jid] = []; // Order memory
+      orderHistory[jid] = [];
       await sock.sendMessage(jid, { 
         image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
         caption: 'Welcome to our restaurant! 😊 Here is our menu. What would you like to order today?'
@@ -97,20 +83,20 @@ async function startBot() {
       return;
     }
 
-    // Order handling (multiple items support)
+    // Order handling (multiple items)
     if (text.toLowerCase().includes('order') || text.toLowerCase().includes('want') || text.toLowerCase().includes('need') || text.toLowerCase().includes('give me') || text.toLowerCase().includes('i want')) {
       const lowerText = text.toLowerCase();
       const orderedItems = [];
       let totalPrice = 0;
 
-      // Split by 'and', ',', 'with', 'or'
-      const possibleItems = lowerText.split(/\s+(?:and|with|or|,)\s+|\s+/).filter(word => word.trim());
+      // Split by 'and', 'with', ',', 'or'
+      const parts = lowerText.split(/\s+(?:and|with|or|,)\s+/).map(p => p.trim());
 
-      for (const word of possibleItems) {
+      for (const part of parts) {
         for (const item in menuItems) {
           const variations = menuItems[item].variations;
           for (const varItem of variations) {
-            if (word.includes(varItem)) {
+            if (part.includes(varItem)) {
               orderedItems.push(item);
               totalPrice += parseInt(menuItems[item].price.replace('Rs ', ''));
               break;
@@ -139,6 +125,21 @@ async function startBot() {
       return;
     }
 
+    // Location reply (final confirm)
+    if (orderHistory[jid] && orderHistory[jid].length > 0) {
+      const lastOrder = orderHistory[jid][orderHistory[jid].length - 1];
+      if (lastOrder.status === 'confirmed' && text.length > 5) { // Assume address is longer
+        lastOrder.location = text;
+        lastOrder.status = 'on way';
+
+        const itemList = lastOrder.items.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
+        await sock.sendMessage(jid, { text: `Thank you Sir! Your order (${itemList} - Rs ${lastOrder.total}) is on the way to: ${text}. Expected in 30 minutes. Order ID: #${Math.floor(Math.random() * 10000) + 1000}. Anything else? 😊` });
+
+        await sock.sendMessage(OWNER_JID, { text: `Order Finalized!\nFrom: ${jid.split('@')[0]}\nItems: ${itemList}\nTotal: Rs ${lastOrder.total}\nAddress: ${text}\nTime: ${new Date().toLocaleString('en-PK')}` });
+      }
+      return;
+    }
+
     // Cancel order
     if (text.toLowerCase().includes('cancel order') || text.toLowerCase().includes('order cancel')) {
       if (orderHistory[jid] && orderHistory[jid].length > 0) {
@@ -154,24 +155,11 @@ async function startBot() {
       return;
     }
 
-    // Change order
-    if (text.toLowerCase().includes('change order') || text.toLowerCase().includes('order change')) {
-      if (orderHistory[jid] && orderHistory[jid].length > 0) {
-        const lastOrder = orderHistory[jid][orderHistory[jid].length - 1];
-        const itemList = lastOrder.items.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
-
-        await sock.sendMessage(jid, { text: 'Your last order was: ' + itemList + ' (Total: Rs ' + lastOrder.total + '). What would you like to change it to, Sir?' });
-      } else {
-        await sock.sendMessage(jid, { text: 'No recent order to change, Sir. Would you like to place one? 😊' });
-      }
-      return;
-    }
-
     // Order status
-    if (text.toLowerCase().includes('order status') || text.toLowerCase().includes('when will order arrive') || text.toLowerCase().includes('order kab aayega')) {
+    if (text.toLowerCase().includes('order status') || text.toLowerCase().includes('when will order arrive')) {
       if (orderHistory[jid] && orderHistory[jid].length > 0) {
         const lastOrder = orderHistory[jid][orderHistory[jid].length - 1];
-        let statusReply = 'Your order is ' + lastOrder.status + '. Expected delivery in 20-30 minutes. Anything else? 😊';
+        let statusReply = `Your order is ${lastOrder.status}. Expected delivery in 20-30 minutes. Anything else? 😊`;
 
         if (lastOrder.status === 'cancelled') {
           statusReply = 'Your last order was cancelled. Would you like to place a new one? 😊';
