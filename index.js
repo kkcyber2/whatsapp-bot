@@ -1,13 +1,16 @@
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 
-let conversationHistory = {};
-let pendingOrders = {};
-let messageTimestamps = {};
+let conversationHistory = {}; // Chat history per user
+let orderHistory = {};        // Order memory per user (last 5)
+let messageTimestamps = {};   // Rate limiting
+let pendingOrders = {};       // Pending for location
+
 const OWNER_JID = process.env.OWNER_JID || '923243249669@s.whatsapp.net';
 const MAX_MESSAGES_PER_MIN = 5;
 const HISTORY_LIMIT = 15;
 
+// Menu Items (only the ones you provided)
 const menuItems = {
   'beef steak': { price: 'Rs 1200', variations: ['beef steak', 'steak', 'beefsteak'] },
   'beef burger': { price: 'Rs 800', variations: ['beef burger', 'burger', 'beefburger'] },
@@ -25,7 +28,7 @@ async function startBot() {
   const sock = makeWASocket({
     auth: state,
     logger: require('pino')({ level: 'silent' }),
-    printQRInTerminal: false
+    printQRInTerminal: false // Hide QR in production logs
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -50,13 +53,14 @@ async function startBot() {
     const msg = messages[0];
     if (!msg.message || msg.key.fromMe) return;
 
+    // Handle non-text
     if (msg.message.audioMessage || msg.message.videoMessage || msg.message.call || msg.message.stickerMessage) {
       await sock.sendMessage(msg.key.remoteJid, { text: 'Sorry Sir, I can only process text messages. Please type your order or say "menu". 😊' });
       return;
     }
 
     let text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-    text = text.replace(/[<>{}();]/g, ''); // Sanitize
+    text = text.replace(/[<>{}();]/g, ''); // Sanitize input
     const jid = msg.key.remoteJid;
 
     console.log('Received from', jid.split('@')[0], ':', text);
@@ -76,6 +80,7 @@ async function startBot() {
     // Welcome + menu
     if (!conversationHistory[jid]) {
       conversationHistory[jid] = [];
+      orderHistory[jid] = [];
       await sock.sendMessage(jid, { 
         image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
         caption: 'Welcome to our restaurant! 😊 Here is our menu. What would you like to order today?'
@@ -140,6 +145,14 @@ async function startBot() {
         await sock.sendMessage(jid, { text: `Order confirmed for ${itemList} (Rs ${totalPrice})! Delivery in 30 min. Where to deliver, Sir? (full address)` });
 
         await sock.sendMessage(OWNER_JID, { text: orderMessage });
+
+        // Timeout pending order after 10 min
+        setTimeout(() => {
+          if (pendingOrders[jid]) {
+            delete pendingOrders[jid];
+            sock.sendMessage(jid, { text: 'Order request timed out. Please place a new order if needed. 😊' });
+          }
+        }, 10 * 60 * 1000);
       } else {
         await sock.sendMessage(jid, { text: 'Sorry Sir, we don\'t have that. Please check the menu. 😊' });
         await sock.sendMessage(jid, { 
@@ -164,6 +177,36 @@ async function startBot() {
       await sock.sendMessage(OWNER_JID, { text: finalOrderMessage });
 
       delete pendingOrders[jid];
+      return;
+    }
+
+    // Order status
+    if (text.toLowerCase().includes('order status') || text.toLowerCase().includes('when will order arrive')) {
+      if (orderHistory[jid] && orderHistory[jid].length > 0) {
+        const lastOrder = orderHistory[jid][orderHistory[jid].length - 1];
+        let reply = `Your last order is ${lastOrder.status}. Expected in 20-30 min. Anything else? 😊`;
+        if (lastOrder.status === 'cancelled') {
+          reply = 'Your last order was cancelled. Want to place a new one? 😊';
+        }
+        await sock.sendMessage(jid, { text: reply });
+      } else {
+        await sock.sendMessage(jid, { text: 'No recent order found. Want to place one? 😊' });
+      }
+      return;
+    }
+
+    // Cancel order
+    if (text.toLowerCase().includes('cancel order') || text.toLowerCase().includes('order cancel')) {
+      if (orderHistory[jid] && orderHistory[jid].length > 0) {
+        const lastOrder = orderHistory[jid][orderHistory[jid].length - 1];
+        lastOrder.status = 'cancelled';
+
+        await sock.sendMessage(jid, { text: 'Your last order has been cancelled. Sorry for any inconvenience. 😊' });
+
+        await sock.sendMessage(OWNER_JID, { text: 'Order Cancelled!\nFrom: ' + jid.split('@')[0] + '\nDetails: ' + lastOrder.details });
+      } else {
+        await sock.sendMessage(jid, { text: 'No recent order to cancel. Want to place one? 😊' });
+      }
       return;
     }
 
@@ -207,7 +250,7 @@ async function startBot() {
       await sock.sendMessage(jid, { text: reply });
     } catch (err) {
       console.error('Groq fetch failed:', err.message);
-      await sock.sendMessage(jid, { text: 'Sorry, assistant temporarily unavailable. Please try again later.' });
+      await sock.sendMessage(jid, { text: 'Sorry, assistant temporarily unavailable. Try again later.' });
     }
   });
 }
