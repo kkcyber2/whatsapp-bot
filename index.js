@@ -2,10 +2,12 @@ const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = requi
 const qrcode = require('qrcode-terminal');
 
 let conversationHistory = {};
-let pendingOrders = {}; // Pending for location
-const OWNER_JID = '923243249669@s.whatsapp.net'; // Owner number
+let pendingOrders = {};
+let messageTimestamps = {};
+const OWNER_JID = process.env.OWNER_JID || '923243249669@s.whatsapp.net';
+const MAX_MESSAGES_PER_MIN = 5;
+const HISTORY_LIMIT = 15;
 
-// Menu Items (only the ones you provided, no extra from me)
 const menuItems = {
   'beef steak': { price: 'Rs 1200', variations: ['beef steak', 'steak', 'beefsteak'] },
   'beef burger': { price: 'Rs 800', variations: ['beef burger', 'burger', 'beefburger'] },
@@ -14,7 +16,7 @@ const menuItems = {
   'beef nihari': { price: 'Rs 1300', variations: ['beef nihari', 'nihari', 'beef nihari'] },
   'fries': { price: 'Rs 250', variations: ['fries', 'french fries', 'chips'] },
   'salad': { price: 'Rs 200', variations: ['salad', 'fresh salad'] },
-  'soft drinks': { price: 'Rs 100', variations: ['soft drink', 'coke', 'pepsi', 'sprite'] },
+  'soft drinks': { price: 'Rs 100', variations: ['soft drink', 'coke', 'pepsi', 'sprite', 'drink'] },
   'lassi': { price: 'Rs 150', variations: ['lassi', 'sweet lassi'] }
 };
 
@@ -23,6 +25,7 @@ async function startBot() {
   const sock = makeWASocket({
     auth: state,
     logger: require('pino')({ level: 'silent' }),
+    printQRInTerminal: false
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -31,13 +34,12 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log('Scan this QR code with WhatsApp:');
-      qrcode.generate(qr, { small: true });
+      console.log('New QR generated - scan via Linked Devices');
     }
 
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('Connection lost', shouldReconnect);
+      console.log('Connection lost. Reconnecting:', shouldReconnect);
       if (shouldReconnect) startBot();
     } else if (connection === 'open') {
       console.log('✅ Connected to WhatsApp!');
@@ -48,27 +50,37 @@ async function startBot() {
     const msg = messages[0];
     if (!msg.message || msg.key.fromMe) return;
 
-    // Handle voice, call, sticker
     if (msg.message.audioMessage || msg.message.videoMessage || msg.message.call || msg.message.stickerMessage) {
       await sock.sendMessage(msg.key.remoteJid, { text: 'Sorry Sir, I can only process text messages. Please type your order or say "menu". 😊' });
       return;
     }
 
-    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+    let text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+    text = text.replace(/[<>{}();]/g, ''); // Sanitize
     const jid = msg.key.remoteJid;
 
-    console.log('Received:', text);
+    console.log('Received from', jid.split('@')[0], ':', text);
 
     if (text.trim() === '') return;
 
-    // First message → welcome + menu
+    // Rate limiting
+    if (!messageTimestamps[jid]) messageTimestamps[jid] = [];
+    const now = Date.now();
+    messageTimestamps[jid] = messageTimestamps[jid].filter(ts => now - ts < 60000);
+    if (messageTimestamps[jid].length >= MAX_MESSAGES_PER_MIN) {
+      await sock.sendMessage(jid, { text: 'Please slow down, Sir. One message at a time. 😊' });
+      return;
+    }
+    messageTimestamps[jid].push(now);
+
+    // Welcome + menu
     if (!conversationHistory[jid]) {
       conversationHistory[jid] = [];
       await sock.sendMessage(jid, { 
         image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
-        caption: 'Welcome to our restaurant! 😊 Here is our menu. What would you like to order?'
+        caption: 'Welcome to our restaurant! 😊 Here is our menu. What would you like to order today?'
       });
-      conversationHistory[jid].push({ role: 'assistant', content: 'Welcome + menu sent' });
+      conversationHistory[jid].push({ role: 'assistant', content: 'Welcome + menu sent', time: now });
       return;
     }
 
@@ -78,6 +90,22 @@ async function startBot() {
         image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
         caption: 'Here is our menu, Sir! What would you like to order?'
       });
+      return;
+    }
+
+    // Complaint / Wrong Order
+    if (text.toLowerCase().includes('wrong order') || text.toLowerCase().includes('order galat') || text.toLowerCase().includes('complaint') || text.toLowerCase().includes('issue') || text.toLowerCase().includes('refund') || text.toLowerCase().includes('problem')) {
+      const customerNumber = jid.split('@')[0];
+      const complaintDetails = text;
+
+      const urgentMessage = `URGENT COMPLAINT!\nFrom: ${customerNumber}\nDetails: ${complaintDetails}\nTime: ${new Date().toLocaleString('en-PK')}\nPlease check immediately!`;
+
+      await sock.sendMessage(jid, { text: 'Sorry for the inconvenience, Sir 😔. Please tell me exactly what went wrong, and I have informed the owner right away. We will fix it quickly.' });
+
+      await sock.sendMessage(OWNER_JID, { text: urgentMessage });
+
+      await sock.sendMessage(jid, { text: 'Can you send more details or a photo? Thank you for your patience.' });
+
       return;
     }
 
@@ -109,7 +137,7 @@ async function startBot() {
         const itemList = orderedItems.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
         const orderMessage = `New Order!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${totalPrice}\nDetails: ${text}\nTime: ${new Date().toLocaleString('en-PK')}`;
 
-        await sock.sendMessage(jid, { text: `Order confirmed for ${itemList} (Total: Rs ${totalPrice})! Delivery in 30 minutes. Where should we deliver, Sir? (full address)` });
+        await sock.sendMessage(jid, { text: `Order confirmed for ${itemList} (Rs ${totalPrice})! Delivery in 30 min. Where to deliver, Sir? (full address)` });
 
         await sock.sendMessage(OWNER_JID, { text: orderMessage });
       } else {
@@ -122,16 +150,16 @@ async function startBot() {
       return;
     }
 
-    // Location reply (smooth final confirm)
+    // Location reply (final confirm)
     if (pendingOrders[jid]) {
       const order = pendingOrders[jid];
       const customerNumber = jid.split('@')[0];
       const location = text;
 
       const itemList = order.items.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
-      const finalOrderMessage = `Order Finalized!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${order.total}\nDetails: ${order.details}\nDelivery Address: ${location}\nTime: ${new Date().toLocaleString('en-PK')}`;
+      const finalOrderMessage = `Order Finalized!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${order.total}\nAddress: ${location}\nTime: ${new Date().toLocaleString('en-PK')}`;
 
-      await sock.sendMessage(jid, { text: `Thank you Sir! Your order (${itemList} - Rs ${order.total}) is on the way to: ${location}. Expected in 30 minutes. Anything else? 😊` });
+      await sock.sendMessage(jid, { text: `Thank you Sir! Order (${itemList} - Rs ${order.total}) on the way to ${location}. Expected in 30 min. Anything else? 😊` });
 
       await sock.sendMessage(OWNER_JID, { text: finalOrderMessage });
 
@@ -141,8 +169,8 @@ async function startBot() {
 
     // Normal conversation (short replies)
     if (!conversationHistory[jid]) conversationHistory[jid] = [];
-    conversationHistory[jid].push({ role: 'user', content: text });
-    if (conversationHistory[jid].length > 20) conversationHistory[jid] = conversationHistory[jid].slice(-20);
+    conversationHistory[jid].push({ role: 'user', content: text, time: Date.now() });
+    if (conversationHistory[jid].length > HISTORY_LIMIT) conversationHistory[jid] = conversationHistory[jid].slice(-HISTORY_LIMIT);
 
     try {
       const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -156,12 +184,12 @@ async function startBot() {
           messages: [
             {
               role: 'system',
-              content: 'You are a friendly, helpful restaurant assistant. Speak ONLY in English. Be warm and welcoming. Keep replies short, positive, no extra words. Always push for orders politely. End with a question. Address as Sir/Miss. Example: "Welcome Sir! What would you like to order? 😊"'
+              content: 'You are a friendly, helpful restaurant assistant. Speak ONLY in English. Be warm and welcoming. Keep replies very short (1-2 sentences max). Always push for orders politely. End with a question. Address as Sir/Miss. Example: "Welcome Sir! What would you like to order? 😊"'
             },
-            ...conversationHistory[jid]
+            ...conversationHistory[jid].map(m => ({ role: m.role, content: m.content }))
           ],
-          temperature: 0.6, // Low for less bak bak
-          max_tokens: 80 // Short replies
+          temperature: 0.6,
+          max_tokens: 80
         })
       });
 
@@ -174,12 +202,12 @@ async function startBot() {
       const data = await groqRes.json();
       const reply = data.choices[0]?.message?.content?.trim() || 'Welcome Sir! What would you like to order? 😊';
 
-      conversationHistory[jid].push({ role: 'assistant', content: reply });
+      conversationHistory[jid].push({ role: 'assistant', content: reply, time: Date.now() });
 
       await sock.sendMessage(jid, { text: reply });
     } catch (err) {
       console.error('Groq fetch failed:', err.message);
-      await sock.sendMessage(jid, { text: 'Sorry, assistant temporarily unavailable.' });
+      await sock.sendMessage(jid, { text: 'Sorry, assistant temporarily unavailable. Please try again later.' });
     }
   });
 }
