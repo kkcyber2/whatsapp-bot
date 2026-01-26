@@ -2,10 +2,10 @@ const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = requi
 const qrcode = require('qrcode-terminal');
 
 let conversationHistory = {};
-let orderHistory = {}; // Per user order memory
+let pendingOrders = {}; // Pending for location
 const OWNER_JID = '923243249669@s.whatsapp.net'; // Owner number
 
-// Full Menu Items
+// Menu Items (only the ones you provided, no extra from me)
 const menuItems = {
   'beef steak': { price: 'Rs 1200', variations: ['beef steak', 'steak', 'beefsteak'] },
   'beef burger': { price: 'Rs 800', variations: ['beef burger', 'burger', 'beefburger'] },
@@ -14,9 +14,8 @@ const menuItems = {
   'beef nihari': { price: 'Rs 1300', variations: ['beef nihari', 'nihari', 'beef nihari'] },
   'fries': { price: 'Rs 250', variations: ['fries', 'french fries', 'chips'] },
   'salad': { price: 'Rs 200', variations: ['salad', 'fresh salad'] },
-  'soft drinks': { price: 'Rs 100', variations: ['soft drink', 'coke', 'pepsi', 'sprite', 'drink'] },
-  'lassi': { price: 'Rs 150', variations: ['lassi', 'sweet lassi'] },
-  'chocolate brownie': { price: 'Rs 400', variations: ['chocolate brownie', 'brownie', 'browni'] }
+  'soft drinks': { price: 'Rs 100', variations: ['soft drink', 'coke', 'pepsi', 'sprite'] },
+  'lassi': { price: 'Rs 150', variations: ['lassi', 'sweet lassi'] }
 };
 
 async function startBot() {
@@ -49,9 +48,9 @@ async function startBot() {
     const msg = messages[0];
     if (!msg.message || msg.key.fromMe) return;
 
-    // Handle non-text
+    // Handle voice, call, sticker
     if (msg.message.audioMessage || msg.message.videoMessage || msg.message.call || msg.message.stickerMessage) {
-      await sock.sendMessage(msg.key.remoteJid, { text: 'Sorry Sir, I can only process text messages right now. Please type your order or say "menu". 😊' });
+      await sock.sendMessage(msg.key.remoteJid, { text: 'Sorry Sir, I can only process text messages. Please type your order or say "menu". 😊' });
       return;
     }
 
@@ -62,13 +61,12 @@ async function startBot() {
 
     if (text.trim() === '') return;
 
-    // Welcome + menu
+    // First message → welcome + menu
     if (!conversationHistory[jid]) {
       conversationHistory[jid] = [];
-      orderHistory[jid] = [];
       await sock.sendMessage(jid, { 
         image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
-        caption: 'Welcome to our restaurant! 😊 Here is our menu. What would you like to order today?'
+        caption: 'Welcome to our restaurant! 😊 Here is our menu. What would you like to order?'
       });
       conversationHistory[jid].push({ role: 'assistant', content: 'Welcome + menu sent' });
       return;
@@ -78,25 +76,24 @@ async function startBot() {
     if (text.toLowerCase().includes('menu') || text.toLowerCase().includes('show menu')) {
       await sock.sendMessage(jid, { 
         image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
-        caption: 'Here is our menu again, Sir! What would you like to order?'
+        caption: 'Here is our menu, Sir! What would you like to order?'
       });
       return;
     }
 
     // Order handling (multiple items)
-    if (text.toLowerCase().includes('order') || text.toLowerCase().includes('want') || text.toLowerCase().includes('need') || text.toLowerCase().includes('give me') || text.toLowerCase().includes('i want')) {
+    if (text.toLowerCase().includes('order') || text.toLowerCase().includes('want') || text.toLowerCase().includes('need')) {
       const lowerText = text.toLowerCase();
       const orderedItems = [];
       let totalPrice = 0;
 
-      // Split by 'and', 'with', ',', 'or'
-      const parts = lowerText.split(/\s+(?:and|with|or|,)\s+/).map(p => p.trim());
+      const possibleItems = lowerText.split(/\s+(?:and|with|or|,)\s+|\s+/).filter(word => word.trim());
 
-      for (const part of parts) {
+      for (const word of possibleItems) {
         for (const item in menuItems) {
           const variations = menuItems[item].variations;
           for (const varItem of variations) {
-            if (part.includes(varItem)) {
+            if (word.includes(varItem)) {
               orderedItems.push(item);
               totalPrice += parseInt(menuItems[item].price.replace('Rs ', ''));
               break;
@@ -106,73 +103,43 @@ async function startBot() {
       }
 
       if (orderedItems.length > 0) {
-        orderHistory[jid].push({ items: orderedItems, total: totalPrice, details: text, status: 'confirmed', time: new Date().toLocaleString('en-PK') });
+        pendingOrders[jid] = { items: orderedItems, total: totalPrice, details: text };
 
         const customerNumber = jid.split('@')[0];
         const itemList = orderedItems.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
-        const orderMessage = `New Order Received!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${totalPrice}\nFull Message: ${text}\nTime: ${new Date().toLocaleString('en-PK')}\nPlease process immediately.`;
+        const orderMessage = `New Order!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${totalPrice}\nDetails: ${text}\nTime: ${new Date().toLocaleString('en-PK')}`;
 
-        await sock.sendMessage(jid, { text: `Order confirmed for: ${itemList} (Total: Rs ${totalPrice})! Delivery in 30 minutes. Where should we deliver, Sir? (full address)` });
+        await sock.sendMessage(jid, { text: `Order confirmed for ${itemList} (Total: Rs ${totalPrice})! Delivery in 30 minutes. Where should we deliver, Sir? (full address)` });
 
         await sock.sendMessage(OWNER_JID, { text: orderMessage });
       } else {
-        await sock.sendMessage(jid, { text: 'Sorry Sir, we don\'t have those items. Please check the menu and order something from it. 😊' });
+        await sock.sendMessage(jid, { text: 'Sorry Sir, we don\'t have that. Please check the menu. 😊' });
         await sock.sendMessage(jid, { 
           image: { url: 'https://graphicsfamily.com/wp-content/uploads/edd/2024/12/Restaurant-Food-Menu-Design-in-Photoshop.jpg' },
-          caption: 'Here is our menu again. What would you like to order?'
+          caption: 'Here is our menu. What would you like?'
         });
       }
       return;
     }
 
-    // Location reply (final confirm)
-    if (orderHistory[jid] && orderHistory[jid].length > 0) {
-      const lastOrder = orderHistory[jid][orderHistory[jid].length - 1];
-      if (lastOrder.status === 'confirmed' && text.length > 5) { // Assume address is longer
-        lastOrder.location = text;
-        lastOrder.status = 'on way';
+    // Location reply (smooth final confirm)
+    if (pendingOrders[jid]) {
+      const order = pendingOrders[jid];
+      const customerNumber = jid.split('@')[0];
+      const location = text;
 
-        const itemList = lastOrder.items.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
-        await sock.sendMessage(jid, { text: `Thank you Sir! Your order (${itemList} - Rs ${lastOrder.total}) is on the way to: ${text}. Expected in 30 minutes. Order ID: #${Math.floor(Math.random() * 10000) + 1000}. Anything else? 😊` });
+      const itemList = order.items.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
+      const finalOrderMessage = `Order Finalized!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${order.total}\nDetails: ${order.details}\nDelivery Address: ${location}\nTime: ${new Date().toLocaleString('en-PK')}`;
 
-        await sock.sendMessage(OWNER_JID, { text: `Order Finalized!\nFrom: ${jid.split('@')[0]}\nItems: ${itemList}\nTotal: Rs ${lastOrder.total}\nAddress: ${text}\nTime: ${new Date().toLocaleString('en-PK')}` });
-      }
+      await sock.sendMessage(jid, { text: `Thank you Sir! Your order (${itemList} - Rs ${order.total}) is on the way to: ${location}. Expected in 30 minutes. Anything else? 😊` });
+
+      await sock.sendMessage(OWNER_JID, { text: finalOrderMessage });
+
+      delete pendingOrders[jid];
       return;
     }
 
-    // Cancel order
-    if (text.toLowerCase().includes('cancel order') || text.toLowerCase().includes('order cancel')) {
-      if (orderHistory[jid] && orderHistory[jid].length > 0) {
-        const lastOrder = orderHistory[jid][orderHistory[jid].length - 1];
-        lastOrder.status = 'cancelled';
-
-        await sock.sendMessage(jid, { text: 'Your last order has been cancelled. Sorry for any inconvenience. What else can I help with? 😊' });
-
-        await sock.sendMessage(OWNER_JID, { text: 'Order Cancelled!\nFrom: ' + jid.split('@')[0] + '\nDetails: ' + lastOrder.details });
-      } else {
-        await sock.sendMessage(jid, { text: 'No recent order to cancel, Sir. Would you like to place one? 😊' });
-      }
-      return;
-    }
-
-    // Order status
-    if (text.toLowerCase().includes('order status') || text.toLowerCase().includes('when will order arrive')) {
-      if (orderHistory[jid] && orderHistory[jid].length > 0) {
-        const lastOrder = orderHistory[jid][orderHistory[jid].length - 1];
-        let statusReply = `Your order is ${lastOrder.status}. Expected delivery in 20-30 minutes. Anything else? 😊`;
-
-        if (lastOrder.status === 'cancelled') {
-          statusReply = 'Your last order was cancelled. Would you like to place a new one? 😊';
-        }
-
-        await sock.sendMessage(jid, { text: statusReply });
-      } else {
-        await sock.sendMessage(jid, { text: 'No recent order found, Sir. Would you like to place one? 😊' });
-      }
-      return;
-    }
-
-    // Normal conversation
+    // Normal conversation (short replies)
     if (!conversationHistory[jid]) conversationHistory[jid] = [];
     conversationHistory[jid].push({ role: 'user', content: text });
     if (conversationHistory[jid].length > 20) conversationHistory[jid] = conversationHistory[jid].slice(-20);
@@ -189,12 +156,12 @@ async function startBot() {
           messages: [
             {
               role: 'system',
-              content: 'You are a friendly, helpful and sales-focused restaurant assistant. Speak ONLY in English. Be warm and welcoming. Always push for orders politely. If customer asks for menu, send it. If they order something not in menu, politely say sorry and send menu again. Keep replies short, positive, and end with a question to continue order. Address as Sir/Miss. Never mention Konain/KK. Example: "Welcome Sir! What would you like to order today? 😊"'
+              content: 'You are a friendly, helpful restaurant assistant. Speak ONLY in English. Be warm and welcoming. Keep replies short, positive, no extra words. Always push for orders politely. End with a question. Address as Sir/Miss. Example: "Welcome Sir! What would you like to order? 😊"'
             },
             ...conversationHistory[jid]
           ],
-          temperature: 0.8,
-          max_tokens: 100
+          temperature: 0.6, // Low for less bak bak
+          max_tokens: 80 // Short replies
         })
       });
 
@@ -205,7 +172,7 @@ async function startBot() {
       }
 
       const data = await groqRes.json();
-      const reply = data.choices[0]?.message?.content?.trim() || 'Welcome Sir! What would you like to order today? 😊';
+      const reply = data.choices[0]?.message?.content?.trim() || 'Welcome Sir! What would you like to order? 😊';
 
       conversationHistory[jid].push({ role: 'assistant', content: reply });
 
