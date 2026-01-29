@@ -23,12 +23,20 @@ const menuItems = {
   'lassi': { price: 'Rs 150', variations: ['lassi', 'sweet lassi'] }
 };
 
+/*
+Proprietary Software - Konain (KK)
+All rights reserved.
+Unauthorized copying, modification, distribution, or resale prohibited.
+See LICENSE.md for full terms.
+Contact: [Your Number] for inquiries.
+*/
+
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info');
   const sock = makeWASocket({
     auth: state,
     logger: require('pino')({ level: 'silent' }),
-    printQRInTerminal: false // Hide QR in production logs
+    printQRInTerminal: false // Security: QR hide in logs
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -77,7 +85,7 @@ async function startBot() {
     }
     messageTimestamps[jid].push(now);
 
-    // Welcome + menu
+    // First message → welcome + menu
     if (!conversationHistory[jid]) {
       conversationHistory[jid] = [];
       orderHistory[jid] = [];
@@ -136,13 +144,14 @@ async function startBot() {
       }
 
       if (orderedItems.length > 0) {
-        pendingOrders[jid] = { items: orderedItems, total: totalPrice, details: text };
+        const orderId = Math.floor(1000 + Math.random() * 9000); // Unique order ID
+        pendingOrders[jid] = { items: orderedItems, total: totalPrice, details: text, orderId };
 
         const customerNumber = jid.split('@')[0];
         const itemList = orderedItems.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
-        const orderMessage = `New Order!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${totalPrice}\nDetails: ${text}\nTime: ${new Date().toLocaleString('en-PK')}`;
+        const orderMessage = `New Order #${orderId}!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${totalPrice}\nDetails: ${text}\nTime: ${new Date().toLocaleString('en-PK')}`;
 
-        await sock.sendMessage(jid, { text: `Order confirmed for ${itemList} (Rs ${totalPrice})! Delivery in 30 min. Where to deliver, Sir? (full address)` });
+        await sock.sendMessage(jid, { text: `Order #${orderId} confirmed for ${itemList} (Rs ${totalPrice})! Delivery in 30 min. Where to deliver, Sir? (full address)` });
 
         await sock.sendMessage(OWNER_JID, { text: orderMessage });
 
@@ -170,11 +179,16 @@ async function startBot() {
       const location = text;
 
       const itemList = order.items.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
-      const finalOrderMessage = `Order Finalized!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${order.total}\nAddress: ${location}\nTime: ${new Date().toLocaleString('en-PK')}`;
+      const finalOrderMessage = `Order #${order.orderId} Finalized!\nFrom: ${customerNumber}\nItems: ${itemList}\nTotal: Rs ${order.total}\nAddress: ${location}\nTime: ${new Date().toLocaleString('en-PK')}`;
 
-      await sock.sendMessage(jid, { text: `Thank you Sir! Order (${itemList} - Rs ${order.total}) on the way to ${location}. Expected in 30 min. Anything else? 😊` });
+      await sock.sendMessage(jid, { text: `Thank you Sir! Order #${order.orderId} (${itemList} - Rs ${order.total}) on the way to ${location}. Expected in 30 min. Anything else? 😊` });
 
       await sock.sendMessage(OWNER_JID, { text: finalOrderMessage });
+
+      // Save to history
+      orderHistory[jid] = orderHistory[jid] || [];
+      orderHistory[jid].push({ id: order.orderId, items: order.items, total: order.total, location, status: 'on way', time: new Date().toLocaleString('en-PK') });
+      if (orderHistory[jid].length > 5) orderHistory[jid] = orderHistory[jid].slice(-5);
 
       delete pendingOrders[jid];
       return;
@@ -183,11 +197,11 @@ async function startBot() {
     // Order status
     if (text.toLowerCase().includes('order status') || text.toLowerCase().includes('when will order arrive')) {
       if (orderHistory[jid] && orderHistory[jid].length > 0) {
-        const lastOrder = orderHistory[jid][orderHistory[jid].length - 1];
-        let reply = `Your last order is ${lastOrder.status}. Expected in 20-30 min. Anything else? 😊`;
-        if (lastOrder.status === 'cancelled') {
-          reply = 'Your last order was cancelled. Want to place a new one? 😊';
-        }
+        let reply = 'Your recent orders:\n';
+        orderHistory[jid].forEach((o, i) => {
+          reply += `#${o.id}: ${o.items.map(i => i.charAt(0).toUpperCase() + i.slice(1)).join(', ')} - Rs ${o.total} (${o.status})\n`;
+        });
+        reply += 'Anything else, Sir? 😊';
         await sock.sendMessage(jid, { text: reply });
       } else {
         await sock.sendMessage(jid, { text: 'No recent order found. Want to place one? 😊' });
@@ -201,9 +215,9 @@ async function startBot() {
         const lastOrder = orderHistory[jid][orderHistory[jid].length - 1];
         lastOrder.status = 'cancelled';
 
-        await sock.sendMessage(jid, { text: 'Your last order has been cancelled. Sorry for any inconvenience. 😊' });
+        await sock.sendMessage(jid, { text: `Order #${lastOrder.id} has been cancelled. Sorry for any inconvenience. 😊` });
 
-        await sock.sendMessage(OWNER_JID, { text: 'Order Cancelled!\nFrom: ' + jid.split('@')[0] + '\nDetails: ' + lastOrder.details });
+        await sock.sendMessage(OWNER_JID, { text: `Order #${lastOrder.id} Cancelled!\nFrom: ${jid.split('@')[0]}\nDetails: ${lastOrder.items.join(', ')}` });
       } else {
         await sock.sendMessage(jid, { text: 'No recent order to cancel. Want to place one? 😊' });
       }
